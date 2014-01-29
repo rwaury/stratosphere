@@ -20,10 +20,9 @@ import eu.stratosphere.core.memory.MemorySegmentSource;
 
 /**
  * Simple memory segment source that draws segments from a list.
- * 
  */
-public class ListMemorySegmentSource implements MemorySegmentSource
-{
+public class ListMemorySegmentSource implements MemorySegmentSource {
+	
 	private final List<MemorySegment> segments;
 	
 	public ListMemorySegmentSource(final List<MemorySegment> memorySegments) {
@@ -38,5 +37,9 @@ public class ListMemorySegmentSource implements MemorySegmentSource
 		} else {
 			return null;
 		}
+	}
+	
+	public void addMemorySegment(MemorySegment seg) {
+		this.segments.add(seg);
 	}
 }
