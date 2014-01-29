@@ -91,7 +91,7 @@ public class LocalDistributedExecutor implements PlanExecutor {
 		javaMem /= numTaskMgr;
 		
 		Configuration conf = NepheleMiniCluster.getMiniclusterDefaultConfig(
-				JOB_MANAGER_RPC_PORT, 6500, 7501, javaMem, null, true, true);
+				JOB_MANAGER_RPC_PORT, 6500, 7501, (int) (javaMem >>> 20), null, true, true);
 		GlobalConfiguration.includeConfiguration(conf);
 			
 		// start job manager

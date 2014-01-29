@@ -56,7 +56,7 @@ public abstract class TestBase2 {
 	
 	private static final int MINIMUM_HEAP_SIZE_MB = 192;
 	
-	private static final long TASK_MANAGER_MEMORY_SIZE = 96;
+	private static final int TASK_MANAGER_MEMORY_SIZE_MB = 96;
 	
 
 	protected final Configuration config;
@@ -91,7 +91,7 @@ public abstract class TestBase2 {
 		this.executor = new NepheleMiniCluster();
 		this.executor.setVisualizerEnabled(false);
 		this.executor.setLazyMemoryAllocation(true);
-		this.executor.setMemorySize(TASK_MANAGER_MEMORY_SIZE);
+		this.executor.setMemorySizeInMegabytes(TASK_MANAGER_MEMORY_SIZE_MB);
 		this.executor.start();
 	}
 

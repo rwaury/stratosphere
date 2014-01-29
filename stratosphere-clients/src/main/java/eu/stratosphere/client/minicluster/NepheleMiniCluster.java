@@ -34,7 +34,7 @@ public class NepheleMiniCluster {
 	
 	private static final int DEFAULT_TM_DATA_PORT = 7501;
 	
-	private static final long DEFAULT_MEMORY_SIZE = -1;
+	private static final int DEFAULT_MEMORY_SIZE = -1;
 	
 	private static final boolean DEFAULT_VISUALIZER_ENABLED = false;
 	
@@ -50,7 +50,7 @@ public class NepheleMiniCluster {
 	
 	private int taskManagerDataPort = DEFAULT_TM_DATA_PORT;
 	
-	private long memorySize = DEFAULT_MEMORY_SIZE;
+	private int memorySizeInMegabytes = DEFAULT_MEMORY_SIZE;
 	
 	private String configDir;
 
@@ -93,12 +93,12 @@ public class NepheleMiniCluster {
 		this.taskManagerDataPort = taskManagerDataPort;
 	}
 	
-	public long getMemorySize() {
-		return memorySize;
+	public int getMemorySizeInMegabytes() {
+		return memorySizeInMegabytes;
 	}
 	
-	public void setMemorySize(long memorySize) {
-		this.memorySize = memorySize;
+	public void setMemorySizeInMegabytes(int memorySize) {
+		this.memorySizeInMegabytes = memorySize;
 	}
 
 	public String getConfigDir() {
@@ -152,7 +152,7 @@ public class NepheleMiniCluster {
 				GlobalConfiguration.loadConfiguration(configDir);
 			} else {
 				Configuration conf = getMiniclusterDefaultConfig(jobManagerRpcPort, taskManagerRpcPort,
-					taskManagerDataPort, memorySize, hdfsConfigFile, lazyMemoryAllocation, visualizerEnabled);
+					taskManagerDataPort, memorySizeInMegabytes, hdfsConfigFile, lazyMemoryAllocation, visualizerEnabled);
 				GlobalConfiguration.includeConfiguration(conf);
 			}
 			
@@ -212,7 +212,7 @@ public class NepheleMiniCluster {
 	}
 	
 	public static Configuration getMiniclusterDefaultConfig(int jobManagerRpcPort, int taskManagerRpcPort,
-			int taskManagerDataPort, long memorySize, String hdfsConfigFile, boolean lazyMemory, boolean visualization)
+			int taskManagerDataPort, int memoryInMegabytes, String hdfsConfigFile, boolean lazyMemory, boolean visualization)
 	{
 		final Configuration config = new Configuration();
 		
@@ -238,8 +238,8 @@ public class NepheleMiniCluster {
 			config.setString("fs.hdfs.hdfsdefault", hdfsConfigFile);
 		}
 		
-		if (memorySize > 0) {
-			config.setLong(ConfigConstants.TASK_MANAGER_MEMORY_SIZE_KEY, memorySize);
+		if (memoryInMegabytes > 0) {
+			config.setLong(ConfigConstants.TASK_MANAGER_MEMORY_SIZE_KEY, memoryInMegabytes);
 		}
 		return config;
 	}

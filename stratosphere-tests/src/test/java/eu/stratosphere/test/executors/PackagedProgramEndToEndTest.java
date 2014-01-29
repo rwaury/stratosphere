@@ -10,24 +10,19 @@
  * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
  * specific language governing permissions and limitations under the License.
  **********************************************************************************************************************/
-package eu.stratosphere.test.localDistributed;
+package eu.stratosphere.test.executors;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.net.URL;
 import java.util.LinkedList;
 
-import eu.stratosphere.api.common.Plan;
-import eu.stratosphere.client.RemoteExecutor;
-import eu.stratosphere.test.exampleRecordPrograms.KMeansStepITCase;
-import org.junit.After;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 
+import eu.stratosphere.client.RemoteExecutor;
 import eu.stratosphere.client.localDistributed.LocalDistributedExecutor;
-import eu.stratosphere.example.java.record.wordcount.WordCount;
-import eu.stratosphere.test.exampleRecordPrograms.WordCountITCase;
+import eu.stratosphere.test.exampleRecordPrograms.KMeansStepITCase;
 
 // When the API changes WordCountForTest needs to be rebuilt and the WordCountForTest.jar in resources needs
 // to be replaced with the new one.
@@ -68,7 +63,7 @@ public class PackagedProgramEndToEndTest {
 							"file://" + points.getAbsolutePath(),
 							"file://" + clusters.getAbsolutePath(),
 							"file://" + outFile.getAbsolutePath(),
-							"1"});
+							"3"});
 
 		} catch (Exception e) {
 			e.printStackTrace();
