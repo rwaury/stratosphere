@@ -15,6 +15,8 @@ package eu.stratosphere.test.executors;
 import eu.stratosphere.client.localDistributed.LocalDistributedExecutor;
 import eu.stratosphere.example.java.record.wordcount.WordCount;
 import eu.stratosphere.test.exampleRecordPrograms.WordCountITCase;
+import eu.stratosphere.util.LogUtils;
+
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -23,6 +25,10 @@ import java.io.FileWriter;
 
 public class LocalDistributedExecutorTest {
 
+	static {
+		LogUtils.initializeDefaultTestConsoleLogger();
+	}
+	
 	@Test
 	public void testLocalDistributedExecutorWithWordCount() {
 

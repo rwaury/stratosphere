@@ -329,7 +329,7 @@ public class ClusterManager implements InstanceManager {
 
 		final String configDir = GlobalConfiguration.getString(CONFIG_DIR_KEY, null);
 		if (configDir == null) {
-			LOG.error("Cannot find configuration directory to read IP to instance type mapping");
+			LOG.info("Cannot find configuration directory to read IP to instance type mapping. Using default types.");
 			return;
 		}
 
@@ -414,7 +414,7 @@ public class ClusterManager implements InstanceManager {
 		// Check if slave file exists
 		final String configDir = GlobalConfiguration.getString(CONFIG_DIR_KEY, null);
 		if (configDir == null) {
-			LOG.error("Cannot find configuration directory to load network topology, using flat topology instead");
+			LOG.info("Cannot find configuration directory to load network topology. Using flat topology.");
 			return NetworkTopology.createEmptyTopology();
 		}
 

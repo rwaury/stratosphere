@@ -15,10 +15,7 @@ package eu.stratosphere.client;
 
 import java.util.List;
 
-import org.apache.log4j.ConsoleAppender;
 import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
-import org.apache.log4j.PatternLayout;
 
 import eu.stratosphere.api.common.Plan;
 import eu.stratosphere.api.common.Program;
@@ -29,9 +26,10 @@ import eu.stratosphere.compiler.dag.DataSinkNode;
 import eu.stratosphere.compiler.plan.OptimizedPlan;
 import eu.stratosphere.compiler.plandump.PlanJSONDumpGenerator;
 import eu.stratosphere.compiler.plantranslate.NepheleJobGraphGenerator;
-import eu.stratosphere.nephele.client.JobExecutionResult;
 import eu.stratosphere.nephele.client.JobClient;
+import eu.stratosphere.nephele.client.JobExecutionResult;
 import eu.stratosphere.nephele.jobgraph.JobGraph;
+import eu.stratosphere.util.LogUtils;
 
 /**
  * A class for executing a {@link Plan} on a local Nephele instance. Note that
@@ -50,8 +48,8 @@ public class LocalExecutor implements PlanExecutor {
 
 	
 	public LocalExecutor() {
-		if (System.getProperty("log4j.configuration") == null) {
-			setLoggingLevel(Level.INFO);
+		if (System.getProperty("log4j.configuration") == null && !LogUtils.isLoggingConfigured()) {
+			LogUtils.initializeDefaultConsoleLogger(Level.INFO);
 		}
 	}
 	
@@ -183,17 +181,5 @@ public class LocalExecutor implements PlanExecutor {
 		PlanJSONDumpGenerator gen = new PlanJSONDumpGenerator();
 		List<DataSinkNode> sinks = PactCompiler.createPreOptimizedPlan(plan);
 		return gen.getPactPlanAsJSON(sinks);
-	}
-	
-	/**
-	 * Utility method for logging
-	 */
-	public static void setLoggingLevel(Level lvl) {
-		Logger root = Logger.getRootLogger();
-		root.removeAllAppenders();
-		PatternLayout layout = new PatternLayout("%d{HH:mm:ss,SSS} %-5p %-60c %x - %m%n");
-		ConsoleAppender appender = new ConsoleAppender(layout, "System.err");
-		root.addAppender(appender);
-		root.setLevel(lvl);
 	}
 }

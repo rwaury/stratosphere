@@ -21,10 +21,15 @@ import org.junit.Test;
 import eu.stratosphere.client.LocalExecutor;
 import eu.stratosphere.example.java.record.wordcount.WordCount;
 import eu.stratosphere.test.exampleRecordPrograms.WordCountITCase;
+import eu.stratosphere.util.LogUtils;
 
 
 public class LocalExecutorTest {
 
+	static {
+		LogUtils.initializeDefaultTestConsoleLogger();
+	}
+	
 	@Test
 	public void testLocalExecutorWithWordCount() {
 		try {

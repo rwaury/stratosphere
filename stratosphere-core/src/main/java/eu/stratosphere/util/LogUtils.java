@@ -36,4 +36,8 @@ public class LogUtils {
 		root.addAppender(appender);
 		root.setLevel(logLevel);
 	}
+	
+	public static boolean isLoggingConfigured() {
+		return Logger.getRootLogger().getAllAppenders().hasMoreElements();
+	}
 }
