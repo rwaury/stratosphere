@@ -13,14 +13,8 @@
 
 package eu.stratosphere.client.minicluster;
 
-import java.lang.reflect.Method;
 import java.util.Map;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-
-import eu.stratosphere.api.common.io.FileInputFormat;
-import eu.stratosphere.api.common.io.FileOutputFormat;
 import eu.stratosphere.configuration.ConfigConstants;
 import eu.stratosphere.configuration.Configuration;
 import eu.stratosphere.configuration.GlobalConfiguration;
@@ -34,15 +28,17 @@ import eu.stratosphere.nephele.jobmanager.JobManager.ExecutionMode;
 
 public class NepheleMiniCluster {
 	
-	private static final Log LOG = LogFactory.getLog(NepheleMiniCluster.class);
-	
 	private static final int DEFAULT_JM_RPC_PORT = 6498;
 	
 	private static final int DEFAULT_TM_RPC_PORT = 6501;
 	
 	private static final int DEFAULT_TM_DATA_PORT = 7501;
 	
-	private static final boolean DEFAULT_VISUALIZER_ENABLED = true;
+	private static final int DEFAULT_MEMORY_SIZE = -1;
+	
+	private static final boolean DEFAULT_VISUALIZER_ENABLED = false;
+	
+	private static final boolean DEFAULT_LAZY_MEMORY_ALLOCATION = true;
 
 	// --------------------------------------------------------------------------------------------
 	
@@ -54,15 +50,15 @@ public class NepheleMiniCluster {
 	
 	private int taskManagerDataPort = DEFAULT_TM_DATA_PORT;
 	
+	private int memorySizeInMegabytes = DEFAULT_MEMORY_SIZE;
+	
 	private String configDir;
 
 	private String hdfsConfigFile;
+	
+	private boolean lazyMemoryAllocation = DEFAULT_LAZY_MEMORY_ALLOCATION;
 
 	private boolean visualizerEnabled = DEFAULT_VISUALIZER_ENABLED;
-	
-	private boolean defaultOverwriteFiles = false;
-	
-	private boolean defaultAlwaysCreateDirectory = false;
 
 	
 	private Thread runner;
@@ -97,6 +93,14 @@ public class NepheleMiniCluster {
 		this.taskManagerDataPort = taskManagerDataPort;
 	}
 	
+	public int getMemorySizeInMegabytes() {
+		return memorySizeInMegabytes;
+	}
+	
+	public void setMemorySizeInMegabytes(int memorySize) {
+		this.memorySizeInMegabytes = memorySize;
+	}
+
 	public String getConfigDir() {
 		return configDir;
 	}
@@ -113,6 +117,14 @@ public class NepheleMiniCluster {
 		this.hdfsConfigFile = hdfsConfigFile;
 	}
 	
+	public boolean isLazyMemoryAllocation() {
+		return lazyMemoryAllocation;
+	}
+	
+	public void setLazyMemoryAllocation(boolean lazyMemoryAllocation) {
+		this.lazyMemoryAllocation = lazyMemoryAllocation;
+	}
+
 	public boolean isVisualizerEnabled() {
 		return visualizerEnabled;
 	}
@@ -121,22 +133,6 @@ public class NepheleMiniCluster {
 		this.visualizerEnabled = visualizerEnabled;
 	}
 	
-	public boolean isDefaultOverwriteFiles() {
-		return defaultOverwriteFiles;
-	}
-	
-	public void setDefaultOverwriteFiles(boolean defaultOverwriteFiles) {
-		this.defaultOverwriteFiles = defaultOverwriteFiles;
-	}
-	
-	public boolean isDefaultAlwaysCreateDirectory() {
-		return defaultAlwaysCreateDirectory;
-	}
-	
-	public void setDefaultAlwaysCreateDirectory(boolean defaultAlwaysCreateDirectory) {
-		this.defaultAlwaysCreateDirectory = defaultAlwaysCreateDirectory;
-	}
-
 	
 	// ------------------------------------------------------------------------
 	// Life cycle and Job Submission
@@ -156,15 +152,11 @@ public class NepheleMiniCluster {
 				GlobalConfiguration.loadConfiguration(configDir);
 			} else {
 				Configuration conf = getMiniclusterDefaultConfig(jobManagerRpcPort, taskManagerRpcPort,
-					taskManagerDataPort, hdfsConfigFile, visualizerEnabled, defaultOverwriteFiles, defaultAlwaysCreateDirectory);
+					taskManagerDataPort, memorySizeInMegabytes, hdfsConfigFile, lazyMemoryAllocation, visualizerEnabled);
 				GlobalConfiguration.includeConfiguration(conf);
 			}
 			
-			// force the input/output format classes to load the default values from the configuration.
-			// we need to do this here, because the format classes may have been initialized before the mini cluster was started
-			initializeIOFormatClasses();
-			
-			// before we start the jobmanager, we need to make sure that there are no lingering IPC threads from before
+			// before we start the JobManager, we need to make sure that there are no lingering IPC threads from before
 			// check that all threads are done before we return
 			Thread[] allThreads = new Thread[Thread.activeCount()];
 			int numThreads = Thread.enumerate(allThreads);
@@ -172,7 +164,7 @@ public class NepheleMiniCluster {
 			for (int i = 0; i < numThreads; i++) {
 				Thread t = allThreads[i];
 				String name = t.getName();
-				if (name.equals("Local Taskmanager IO Loop") || name.startsWith("IPC")) {
+				if (name.startsWith("IPC")) {
 					t.join();
 				}
 			}
@@ -188,7 +180,7 @@ public class NepheleMiniCluster {
 			};
 			runner.setDaemon(true);
 			runner.start();
-	
+			
 			waitForJobManagerToBecomeReady();
 		}
 	}
@@ -215,28 +207,12 @@ public class NepheleMiniCluster {
 	private void waitForJobManagerToBecomeReady() throws InterruptedException {
 		Map<InstanceType, InstanceTypeDescription> instanceMap;
 		while ((instanceMap = jobManager.getMapOfAvailableInstanceTypes()) == null || instanceMap.isEmpty()) {
-			Thread.sleep(100);
-		}
-	}
-	
-	private static void initializeIOFormatClasses() {
-		try {
-			Method im = FileInputFormat.class.getDeclaredMethod("initDefaultsFromConfiguration");
-			im.setAccessible(true);
-			im.invoke(null);
-			
-			Method om = FileOutputFormat.class.getDeclaredMethod("initDefaultsFromConfiguration");
-			om.setAccessible(true);
-			om.invoke(null);
-		}
-		catch (Exception e) {
-			LOG.error("Cannot (re) initialize the globally loaded defaults. Some classes might mot follow the specified default behavior.");
+			Thread.sleep(50);
 		}
 	}
 	
 	public static Configuration getMiniclusterDefaultConfig(int jobManagerRpcPort, int taskManagerRpcPort,
-			int taskManagerDataPort, String hdfsConfigFile, boolean visualization,
-			boolean defaultOverwriteFiles, boolean defaultAlwaysCreateDirectory)
+			int taskManagerDataPort, int memoryInMegabytes, String hdfsConfigFile, boolean lazyMemory, boolean visualization)
 	{
 		final Configuration config = new Configuration();
 		
@@ -252,18 +228,19 @@ public class NepheleMiniCluster {
 		// polling interval
 		config.setInteger(ConfigConstants.JOBCLIENT_POLLING_INTERVAL_KEY, 2);
 		
+		config.setBoolean(ConfigConstants.TASK_MANAGER_MEMORY_LAZY_ALLOCATION_KEY, lazyMemory);
+		
 		// enable / disable features
 		config.setBoolean("jobmanager.visualization.enable", visualization);
 		
 		// hdfs
 		if (hdfsConfigFile != null) {
-			config.setString(ConfigConstants.HDFS_DEFAULT_CONFIG, hdfsConfigFile);
+			config.setString("fs.hdfs.hdfsdefault", hdfsConfigFile);
 		}
 		
-		// file system behavior
-		config.setBoolean(ConfigConstants.FILESYSTEM_DEFAULT_OVERWRITE_KEY, defaultOverwriteFiles);
-		config.setBoolean(ConfigConstants.FILESYSTEM_OUTPUT_ALWAYS_CREATE_DIRECTORY_KEY, defaultAlwaysCreateDirectory);
-
+		if (memoryInMegabytes > 0) {
+			config.setLong(ConfigConstants.TASK_MANAGER_MEMORY_SIZE_KEY, memoryInMegabytes);
+		}
 		return config;
 	}
 }

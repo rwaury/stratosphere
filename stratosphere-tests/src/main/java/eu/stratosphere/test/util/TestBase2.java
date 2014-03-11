@@ -26,7 +26,6 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 
 import org.apache.commons.io.FileUtils;
@@ -56,6 +55,9 @@ import eu.stratosphere.util.LogUtils;
 public abstract class TestBase2 {
 	
 	private static final int MINIMUM_HEAP_SIZE_MB = 192;
+	
+	private static final int TASK_MANAGER_MEMORY_SIZE_MB = 96;
+	
 
 	protected final Configuration config;
 	
@@ -67,10 +69,6 @@ public abstract class TestBase2 {
 	
 	private JobExecutionResult jobExecutionResult;
 	
-	
-	public TestBase2() {
-		this(new Configuration());
-	}
 	
 	public TestBase2(Configuration config) {
 		verifyJvmOptions();
@@ -91,8 +89,9 @@ public abstract class TestBase2 {
 	@Before
 	public void startCluster() throws Exception {
 		this.executor = new NepheleMiniCluster();
-		this.executor.setDefaultOverwriteFiles(true);
-		
+		this.executor.setVisualizerEnabled(false);
+		this.executor.setLazyMemoryAllocation(true);
+		this.executor.setMemorySizeInMegabytes(TASK_MANAGER_MEMORY_SIZE_MB);
 		this.executor.start();
 	}
 
@@ -115,8 +114,7 @@ public abstract class TestBase2 {
 		// pre-submit
 		try {
 			preSubmit();
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			System.err.println(e.getMessage());
 			e.printStackTrace();
 			Assert.fail("Pre-submit work caused an error: " + e.getMessage());
@@ -126,8 +124,7 @@ public abstract class TestBase2 {
 		JobGraph jobGraph = null;
 		try {
 			jobGraph = getJobGraph();
-		}
-		catch(Exception e) {
+		} catch(Exception e) {
 			System.err.println(e.getMessage());
 			e.printStackTrace();
 			Assert.fail("Failed to obtain JobGraph!");
@@ -139,8 +136,8 @@ public abstract class TestBase2 {
 			JobClient client = this.executor.getJobClient(jobGraph);
 			client.setConsoleStreamForReporting(getNullPrintStream());
 			this.jobExecutionResult = client.submitJobAndWait();
-		}
-		catch(Exception e) {
+			
+		} catch(Exception e) {
 			System.err.println(e.getMessage());
 			e.printStackTrace();
 			Assert.fail("Job execution failed!");
@@ -149,8 +146,7 @@ public abstract class TestBase2 {
 		// post-submit
 		try {
 			postSubmit();
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			System.err.println(e.getMessage());
 			e.printStackTrace();
 			Assert.fail("Post-submit work caused an error: " + e.getMessage());
@@ -199,32 +195,7 @@ public abstract class TestBase2 {
 	}
 	
 	public BufferedReader[] getResultReader(String resultPath) throws IOException {
-		return getResultReader(resultPath, false);
-	}
-	
-	public BufferedReader[] getResultReader(String resultPath, boolean inOrderOfFiles) throws IOException {
 		File[] files = getAllInvolvedFiles(resultPath);
-		
-		if (inOrderOfFiles) {
-			// sort the files after their name (1, 2, 3, 4)...
-			// we cannot sort by path, because strings sort by prefix
-			Arrays.sort(files, new Comparator<File>() {
-
-				@Override
-				public int compare(File o1, File o2) {
-					try {
-						int f1 = Integer.parseInt(o1.getName());
-						int f2 = Integer.parseInt(o2.getName());
-						return f1 < f2 ? -1 : (f1 > f2 ? 1 : 0);
-					}
-					catch (NumberFormatException e) {
-						throw new RuntimeException("The file names are no numbers and cannot be ordered: " + 
-									o1.getName() + "/" + o2.getName());
-					}
-				}
-			});
-		}
-		
 		BufferedReader[] readers = new BufferedReader[files.length];
 		for (int i = 0; i < files.length; i++) {
 			readers[i] = new BufferedReader(new FileReader(files[i]));
@@ -242,11 +213,7 @@ public abstract class TestBase2 {
 	}
 	
 	public void readAllResultLines(List<String> target, String resultPath) throws IOException {
-		readAllResultLines(target, resultPath, false);
-	}
-	
-	public void readAllResultLines(List<String> target, String resultPath, boolean inOrderOfFiles) throws IOException {
-		for (BufferedReader reader : getResultReader(resultPath, inOrderOfFiles)) {
+		for (BufferedReader reader : getResultReader(resultPath)) {
 			String s = null;
 			while ((s = reader.readLine()) != null) {
 				target.add(s);
@@ -256,25 +223,13 @@ public abstract class TestBase2 {
 	
 	public void compareResultsByLinesInMemory(String expectedResultStr, String resultPath) throws Exception {
 		ArrayList<String> list = new ArrayList<String>();
-		readAllResultLines(list, resultPath, false);
+		readAllResultLines(list, resultPath);
 		
 		String[] result = (String[]) list.toArray(new String[list.size()]);
 		Arrays.sort(result);
 		
 		String[] expected = expectedResultStr.split("\n");
 		Arrays.sort(expected);
-		
-		Assert.assertEquals("Different number of lines in expected and obtained result.", expected.length, result.length);
-		Assert.assertArrayEquals(expected, result);
-	}
-	
-	public void compareResultsByLinesInMemoryWithStrictOrder(String expectedResultStr, String resultPath) throws Exception {
-		ArrayList<String> list = new ArrayList<String>();
-		readAllResultLines(list, resultPath, true);
-		
-		String[] result = (String[]) list.toArray(new String[list.size()]);
-		
-		String[] expected = expectedResultStr.split("\n");
 		
 		Assert.assertEquals("Different number of lines in expected and obtained result.", expected.length, result.length);
 		Assert.assertArrayEquals(expected, result);

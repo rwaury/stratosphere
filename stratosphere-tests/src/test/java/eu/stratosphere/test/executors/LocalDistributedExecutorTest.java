@@ -10,11 +10,11 @@
  * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
  * specific language governing permissions and limitations under the License.
  **********************************************************************************************************************/
-package eu.stratosphere.test.localDistributed;
+package eu.stratosphere.test.executors;
 
 import eu.stratosphere.client.localDistributed.LocalDistributedExecutor;
 import eu.stratosphere.example.java.record.wordcount.WordCount;
-import eu.stratosphere.test.testdata.WordCountData;
+import eu.stratosphere.test.exampleRecordPrograms.WordCountITCase;
 import eu.stratosphere.util.LogUtils;
 
 import org.junit.Assert;
@@ -23,7 +23,7 @@ import org.junit.Test;
 import java.io.File;
 import java.io.FileWriter;
 
-public class LocalDistributedExecutorITCase {
+public class LocalDistributedExecutorTest {
 
 	static {
 		LogUtils.initializeDefaultTestConsoleLogger();
@@ -42,14 +42,14 @@ public class LocalDistributedExecutorITCase {
 			outFile.deleteOnExit();
 			
 			FileWriter fw = new FileWriter(inFile);
-			fw.write(WordCountData.TEXT);
+			fw.write(WordCountITCase.TEXT);
 			fw.close();
 			
 			// run WordCount
 			WordCount wc = new WordCount();
 
 			lde.start(2);
-			lde.run(wc.getPlan("4", inFile.toURI().toString(), outFile.toURI().toString()));
+			lde.run(wc.getPlan("4", "file://" + inFile.getAbsolutePath(), "file://" + outFile.getAbsolutePath()));
 		} catch (Exception e) {
 			e.printStackTrace();
 			Assert.fail(e.getMessage());

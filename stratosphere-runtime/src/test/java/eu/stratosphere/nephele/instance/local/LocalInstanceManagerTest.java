@@ -13,24 +13,20 @@
 
 package eu.stratosphere.nephele.instance.local;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 import junit.framework.Assert;
 
 import org.junit.Test;
 
 import eu.stratosphere.configuration.GlobalConfiguration;
-import eu.stratosphere.nephele.instance.InstanceType;
 import eu.stratosphere.nephele.jobmanager.JobManager;
 import eu.stratosphere.nephele.jobmanager.JobManager.ExecutionMode;
 import eu.stratosphere.nephele.util.ServerTestUtils;
 
 /**
  * Tests for the {@link LocalInstanceManager}.
- * 
  */
 public class LocalInstanceManagerTest {
-
 
 	/**
 	 * Checks if the local instance manager reads the default correctly from the configuration file.
@@ -43,27 +39,19 @@ public class LocalInstanceManagerTest {
 			fail("Cannot locate configuration directory");
 		}
 
-        GlobalConfiguration.loadConfiguration(configDir);
-        
-        
+		GlobalConfiguration.loadConfiguration(configDir);
+
 		// start JobManager
-        ExecutionMode executionMode = ExecutionMode.LOCAL;
-        JobManager jm = new JobManager(executionMode);
-       
+		ExecutionMode executionMode = ExecutionMode.LOCAL;
+		JobManager jm = new JobManager(executionMode);
+
 		final TestInstanceListener testInstanceListener = new TestInstanceListener();
 
-		LocalInstanceManager lm = (LocalInstanceManager) jm.getInstanceManager(); // this is for sure, because I chose the local strategy
+		LocalInstanceManager lm = (LocalInstanceManager) jm.getInstanceManager();
 		try {
 			lm.setInstanceListener(testInstanceListener);
 
-			final InstanceType defaultInstanceType = lm.getDefaultInstanceType();
-			assertEquals("test", defaultInstanceType.getIdentifier());
-			assertEquals(4, defaultInstanceType.getNumberOfComputeUnits());
-			assertEquals(4, defaultInstanceType.getNumberOfCores());
-			assertEquals(1024, defaultInstanceType.getMemorySize());
-			assertEquals(160, defaultInstanceType.getDiskCapacity());
-			assertEquals(0, defaultInstanceType.getPricePerHour());
-
+			lm.getDefaultInstanceType();
 		} catch (Exception e) {
 			e.printStackTrace();
 			Assert.fail("Instantiation of LocalInstanceManager failed: " + e.getMessage());

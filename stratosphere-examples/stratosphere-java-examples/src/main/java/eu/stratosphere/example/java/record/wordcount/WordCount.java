@@ -13,17 +13,22 @@
 
 package eu.stratosphere.example.java.record.wordcount;
 
+import java.io.Serializable;
 import java.util.Iterator;
 import java.util.StringTokenizer;
+
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
 
 import eu.stratosphere.api.common.Plan;
 import eu.stratosphere.api.common.Program;
 import eu.stratosphere.api.common.ProgramDescription;
+import eu.stratosphere.api.common.accumulators.AccumulatorHelper;
 import eu.stratosphere.api.common.operators.FileDataSink;
 import eu.stratosphere.api.common.operators.FileDataSource;
-import eu.stratosphere.api.java.record.functions.FunctionAnnotation.ConstantFields;
 import eu.stratosphere.api.java.record.functions.MapFunction;
 import eu.stratosphere.api.java.record.functions.ReduceFunction;
+import eu.stratosphere.api.java.record.functions.FunctionAnnotation.ConstantFields;
 import eu.stratosphere.api.java.record.io.CsvOutputFormat;
 import eu.stratosphere.api.java.record.io.TextInputFormat;
 import eu.stratosphere.api.java.record.operators.MapOperator;
@@ -42,17 +47,14 @@ import eu.stratosphere.util.Collector;
  */
 public class WordCount implements Program, ProgramDescription {
 	
-	private static final long serialVersionUID = 1L;
-
-
 	/**
 	 * Converts a Record containing one string in to multiple string/integer pairs.
 	 * The string is tokenized by whitespaces. For each token a new record is emitted,
 	 * where the token is the first field and an Integer(1) is the second field.
 	 */
-	public static class TokenizeLine extends MapFunction {
+	public static class TokenizeLine extends MapFunction implements Serializable {
 		private static final long serialVersionUID = 1L;
-
+		
 		@Override
 		public void map(Record record, Collector<Record> collector) {
 			// get the first field (as type StringValue) from the record
@@ -78,7 +80,7 @@ public class WordCount implements Program, ProgramDescription {
 	 */
 	@Combinable
 	@ConstantFields(0)
-	public static class CountWords extends ReduceFunction {
+	public static class CountWords extends ReduceFunction implements Serializable {
 		
 		private static final long serialVersionUID = 1L;
 		
@@ -120,8 +122,12 @@ public class WordCount implements Program, ProgramDescription {
 			.input(mapper)
 			.name("Count Words")
 			.build();
-		@SuppressWarnings("unchecked")
-		FileDataSink out = new FileDataSink(new CsvOutputFormat("\n", " ", StringValue.class, IntValue.class), output, reducer, "Word Counts");
+		FileDataSink out = new FileDataSink(new CsvOutputFormat(), output, reducer, "Word Counts");
+		CsvOutputFormat.configureRecordFormat(out)
+			.recordDelimiter('\n')
+			.fieldDelimiter(' ')
+			.field(StringValue.class, 0)
+			.field(IntValue.class, 1);
 		
 		Plan plan = new Plan(out, "WordCount Example");
 		plan.setDefaultParallelism(numSubTasks);
@@ -131,7 +137,7 @@ public class WordCount implements Program, ProgramDescription {
 
 	@Override
 	public String getDescription() {
-		return "Parameters: <numSubStasks> <input> <output>";
+		return "Parameters: [numSubStasks] [input] [output]";
 	}
 
 	
@@ -148,8 +154,8 @@ public class WordCount implements Program, ProgramDescription {
 		// This will execute the word-count embedded in a local context. replace this line by the commented
 		// succeeding line to send the job to a local installation or to a cluster for execution
 		JobExecutionResult result = LocalExecutor.execute(plan);
-		System.err.println("Total runtime: " + result.getNetRuntime());
-//		PlanExecutor ex = new RemoteExecutor("localhost", 6123, "stratosphere-java-examples-0.4-WordCount.jar");
+		System.err.println("Total runtime: "+result.getNetRuntime());
+//		PlanExecutor ex = new RemoteExecutor("localhost", 6123, "target/pact-examples-0.4-SNAPSHOT-WordCount.jar");
 //		ex.executePlan(plan);
 	}
 }

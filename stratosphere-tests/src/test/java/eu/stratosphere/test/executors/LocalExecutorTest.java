@@ -10,21 +10,25 @@
  * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
  * specific language governing permissions and limitations under the License.
  **********************************************************************************************************************/
-package eu.stratosphere.test.clients.examples;
+package eu.stratosphere.test.executors;
 
 import java.io.File;
 import java.io.FileWriter;
 
-import org.apache.log4j.Level;
 import org.junit.Assert;
 import org.junit.Test;
 
 import eu.stratosphere.client.LocalExecutor;
 import eu.stratosphere.example.java.record.wordcount.WordCount;
-import eu.stratosphere.test.testdata.WordCountData;
+import eu.stratosphere.test.exampleRecordPrograms.WordCountITCase;
+import eu.stratosphere.util.LogUtils;
 
 
 public class LocalExecutorTest {
+
+	static {
+		LogUtils.initializeDefaultTestConsoleLogger();
+	}
 	
 	@Test
 	public void testLocalExecutorWithWordCount() {
@@ -36,20 +40,12 @@ public class LocalExecutorTest {
 			outFile.deleteOnExit();
 			
 			FileWriter fw = new FileWriter(inFile);
-			fw.write(WordCountData.TEXT);
+			fw.write(WordCountITCase.TEXT);
 			fw.close();
 			
 			// run WordCount
 			WordCount wc = new WordCount();
-			wc.getPlan("4", inFile.toURI().toString(), outFile.toURI().toString());
-			
-			LocalExecutor executor = new LocalExecutor();
-			LocalExecutor.setLoggingLevel(Level.ERROR);
-			executor.setDefaultOverwriteFiles(true);
-			executor.start();
-			
-			executor.executePlan(wc.getPlan("4", inFile.toURI().toString(), outFile.toURI().toString()));
-			executor.stop();
+			LocalExecutor.execute(wc, "4", inFile.toURI().toString(), outFile.toURI().toString());
 		} catch (Exception e) {
 			e.printStackTrace();
 			Assert.fail(e.getMessage());
