@@ -52,25 +52,21 @@ public abstract class FileOutputFormat<IT> implements OutputFormat<IT> {
 	
 	// --------------------------------------------------------------------------------------------
 
-	private static WriteMode DEFAULT_WRITE_MODE;
+	private static final WriteMode DEFAULT_WRITE_MODE;
 	
-	private static  OutputDirectoryMode DEFAULT_OUTPUT_DIRECTORY_MODE;
+	private static final OutputDirectoryMode DEFAULT_OUTPUT_DIRECTORY_MODE;
 	
 	
-	private static final void initDefaultsFromConfiguration() {
+	static {
 		final boolean overwrite = GlobalConfiguration.getBoolean(ConfigConstants.FILESYSTEM_DEFAULT_OVERWRITE_KEY,
-			ConfigConstants.DEFAULT_FILESYSTEM_OVERWRITE);
-	
+				ConfigConstants.DEFAULT_FILESYSTEM_OVERWRITE);
+		
 		DEFAULT_WRITE_MODE = overwrite ? WriteMode.OVERWRITE : WriteMode.CREATE;
 		
 		final boolean alwaysCreateDirectory = GlobalConfiguration.getBoolean(ConfigConstants.FILESYSTEM_OUTPUT_ALWAYS_CREATE_DIRECTORY_KEY,
 			ConfigConstants.DEFAULT_FILESYSTEM_ALWAYS_CREATE_DIRECTORY);
 	
 		DEFAULT_OUTPUT_DIRECTORY_MODE = alwaysCreateDirectory ? OutputDirectoryMode.ALWAYS : OutputDirectoryMode.PARONLY;
-	}
-	
-	static {
-		initDefaultsFromConfiguration();
 	}
 	
 	// --------------------------------------------------------------------------------------------	
@@ -144,7 +140,7 @@ public abstract class FileOutputFormat<IT> implements OutputFormat<IT> {
 		}
 		
 		if (this.openTimeout == -1) {
-			this.openTimeout = FileInputFormat.getDefaultOpeningTimeout();
+			this.openTimeout = FileInputFormat.DEFAULT_OPENING_TIMEOUT;
 		}
 	}
 
