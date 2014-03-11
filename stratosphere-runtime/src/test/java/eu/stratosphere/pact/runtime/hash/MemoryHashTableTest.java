@@ -25,11 +25,14 @@ import eu.stratosphere.api.common.typeutils.TypeComparator;
 import eu.stratosphere.api.common.typeutils.TypePairComparator;
 import eu.stratosphere.api.common.typeutils.TypeSerializer;
 import eu.stratosphere.core.memory.MemorySegment;
+import eu.stratosphere.pact.runtime.test.util.types.IntList;
+import eu.stratosphere.pact.runtime.test.util.types.IntListComparator;
+import eu.stratosphere.pact.runtime.test.util.types.IntListPairComparator;
+import eu.stratosphere.pact.runtime.test.util.types.IntListSerializer;
 import eu.stratosphere.pact.runtime.test.util.types.IntPair;
 import eu.stratosphere.pact.runtime.test.util.types.IntPairComparator;
 import eu.stratosphere.pact.runtime.test.util.types.IntPairPairComparator;
 import eu.stratosphere.pact.runtime.test.util.types.IntPairSerializer;
-
 import static org.junit.Assert.*;
 
 
@@ -43,12 +46,22 @@ public class MemoryHashTableTest {
 	
 	
 	private final Random rnd = new Random(RANDOM_SEED);
-	
+		
 	private final TypeSerializer<IntPair> serializer = new IntPairSerializer();
 	
 	private final TypeComparator<IntPair> comparator = new IntPairComparator();
 	
 	private final TypePairComparator<IntPair, IntPair> pairComparator = new IntPairPairComparator();
+	
+	
+	private static final int MAX_LIST_SIZE = 8;
+	
+	private final TypeSerializer<IntList> serializerV = new IntListSerializer();
+	
+	private final TypeComparator<IntList> comparatorV = new IntListComparator();
+	
+	private final TypePairComparator<IntList, IntList> pairComparatorV = new IntListPairComparator();
+
 	
 	
 	@Test
@@ -85,6 +98,60 @@ public class MemoryHashTableTest {
 		}
 	}
 	
+	@Test
+	public void testVariableLengthBuildAndRetrieve() {
+		try {
+			final int NUM_LISTS = 20000;
+			final int NUM_MEM_PAGES = 100 * NUM_LISTS / PAGE_SIZE;
+			
+			final IntList[] lists = getRandomizedIntLists(NUM_LISTS, rnd);
+			
+			CompactingHashTable<IntList> table = new CompactingHashTable<IntList>(serializerV, comparatorV, getMemory(NUM_MEM_PAGES, PAGE_SIZE));
+			table.open();
+			
+			for (int i = 0; i < NUM_LISTS; i++) {
+				try {
+					table.insert(lists[i]);
+				} catch (Exception e) {
+					System.out.println("index: " + i + " ");
+					throw e;
+				}
+			}
+						
+			CompactingHashTable<IntList>.HashTableProber<IntList> prober = table.createProber(comparatorV.duplicate(), pairComparatorV);
+			IntList target = new IntList();
+			
+			for (int i = 0; i < NUM_LISTS; i++) {
+				assertTrue(prober.getMatchFor(lists[i], target));
+				assertArrayEquals(lists[i].getValue(), target.getValue());
+			}
+			
+			final IntList[] overwriteLists = getRandomizedIntLists(NUM_LISTS, rnd);
+			
+			// test replacing
+			IntList tempHolder = new IntList();
+			for (int i = 0; i < NUM_LISTS; i++) {
+				try {
+					table.insertOrReplaceRecord(overwriteLists[i], tempHolder);
+				} catch (NullPointerException e) {
+					throw e;
+				}
+			}
+			
+			for (int i = 0; i < NUM_LISTS; i++) {
+				assertTrue(prober.getMatchFor(overwriteLists[i], target));
+				assertArrayEquals(overwriteLists[i].getValue(), target.getValue());
+			}
+			
+			table.close();
+			assertEquals("Memory lost", NUM_MEM_PAGES, table.getFreeMemory().size());
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			fail("Error: " + e.getMessage());
+		}
+	}
+	
 	
 	private static IntPair[] getRandomizedIntPairs(int num, Random rnd) {
 		IntPair[] pairs = new IntPair[num];
@@ -105,6 +172,20 @@ public class MemoryHashTableTest {
 		}
 		
 		return pairs;
+	}
+	
+	private static IntList[] getRandomizedIntLists(int num, Random rnd) {
+		IntList[] lists = new IntList[num];
+		for (int i = 0; i < num; i++) {
+			int[] value = new int[rnd.nextInt(MAX_LIST_SIZE)+1];
+			//int[] value = new int[MAX_LIST_SIZE-1];
+			for (int j = 0; j < value.length; j++) {
+				value[j] = -rnd.nextInt(Integer.MAX_VALUE);
+			}
+			lists[i] = new IntList(i, value);
+		}
+		
+		return lists;
 	}
 	
 	private static List<MemorySegment> getMemory(int numPages, int pageSize) {

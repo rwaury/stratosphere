@@ -57,7 +57,9 @@ public class InMemoryPartition<T> {
 	
 	// ----------------------------------------- General ------------------------------------------------
 	
-	private final int partitionNumber;					// the number of the partition
+	private int partitionNumber;					// the number of the partition
+	
+	private boolean compacted;
 	
 	// --------------------------------------------------------------------------------------------------
 	
@@ -88,6 +90,7 @@ public class InMemoryPartition<T> {
 		
 		// add the first segment
 		this.partitionPages.add(memSource.nextSegment());
+		this.compacted = true;
 		
 		this.writeView = new WriteView(this.partitionPages, memSource, pageSize, pageSizeInBits);
 		this.readView = new ReadView(this.partitionPages, pageSize, pageSizeInBits);
@@ -104,12 +107,28 @@ public class InMemoryPartition<T> {
 		return this.partitionNumber;
 	}
 	
+	public void setPartitionNumber(int number) {
+		this.partitionNumber = number;
+	}
+	
 	public int getBlockCount() {
 		return this.partitionPages.size();
 	}
 	
 	public long getRecordCount() {
 		return this.recordCounter;
+	}
+	
+	public void resetRecordCounter() {
+		this.recordCounter = 0L;
+	}
+	
+	public boolean isCompacted() {
+		return this.compacted;
+	}
+	
+	public void setCompaction(boolean compacted) {
+		this.compacted = compacted;
 	}
 	
 	// --------------------------------------------------------------------------------------------------
@@ -137,7 +156,6 @@ public class InMemoryPartition<T> {
 			for (int bufNum = this.partitionPages.size() - 1; bufNum > oldCurrentBuffer; bufNum--) {
 				this.availableMemory.addMemorySegment(this.partitionPages.remove(bufNum));
 			}
-			
 			throw e;
 		}
 	}
@@ -145,6 +163,21 @@ public class InMemoryPartition<T> {
 	public void readRecordAt(long pointer, T record) throws IOException {
 		this.readView.setReadPosition(pointer);
 		this.serializer.deserialize(record, this.readView);
+	}
+	
+	/**
+	 * UNSAFE!! overwrites record
+	 * causes inconsistency or data loss for overwriting everything but records of the exact same size
+	 * 
+	 * @param pointer pointer to start of record
+	 * @param record record to overwrite old one with
+	 * @throws IOException
+	 */
+	public void overwriteRecordAt(long pointer, T record) throws IOException {
+		long tmpPointer = this.writeView.getCurrentPointer();
+		this.writeView.resetTo(pointer);
+		this.serializer.serialize(record, this.writeView);
+		this.writeView.resetTo(tmpPointer);
 	}
 	
 	public void clearAllMemory(List<MemorySegment> target) {
@@ -157,8 +190,19 @@ public class InMemoryPartition<T> {
 		
 		// return the partition buffers
 		target.addAll(this.partitionPages);
+		this.partitionPages.clear();
 	}
 	
+	public void allocateSegments(int numberOfSegments) {
+		while(getBlockCount() < numberOfSegments) {
+			MemorySegment next = this.availableMemory.nextSegment();
+			if(next != null) {
+				this.partitionPages.add(next);
+			} else {
+				return;
+			}
+		}
+	}
 
 	@Override
 	public String toString() {
@@ -179,7 +223,7 @@ public class InMemoryPartition<T> {
 		
 		private int currentPageNumber;
 		
-		private int pageNumberOffset;
+		private int segmentNumberOffset;
 		
 		
 		private WriteView(ArrayList<MemorySegment> pages, MemorySegmentSource memSource,
@@ -197,6 +241,9 @@ public class InMemoryPartition<T> {
 		@Override
 		protected MemorySegment nextSegment(MemorySegment current, int bytesUsed) throws IOException {
 			MemorySegment next = this.memSource.nextSegment();
+			if(next == null) {
+				throw new EOFException();
+			}
 			this.pages.add(next);
 			
 			this.currentPageNumber++;
@@ -213,14 +260,14 @@ public class InMemoryPartition<T> {
 			
 			this.currentPageNumber = pageNum;
 			
-			int posInArray = pageNum - this.pageNumberOffset;
+			int posInArray = pageNum - this.segmentNumberOffset;
 			seekOutput(this.pages.get(posInArray), offset);
 			
 			return posInArray;
 		}
 		
-		public void setPageNumberOffset(int offset) {
-			this.pageNumberOffset = offset;
+		public void setSegmentNumberOffset(int offset) {
+			this.segmentNumberOffset = offset;
 		}
 	}
 	
@@ -272,8 +319,9 @@ public class InMemoryPartition<T> {
 			seekInput(this.segments.get(bufferNum), offset, this.segmentSizeMask + 1);
 		}
 		
-		public void setPageNumberOffset(int offset) {
+		public void setSegmentNumberOffset(int offset) {
 			this.segmentNumberOffset = offset;
 		}
 	}
+
 }

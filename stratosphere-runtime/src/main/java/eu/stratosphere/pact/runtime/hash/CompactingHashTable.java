@@ -14,6 +14,7 @@
 package eu.stratosphere.pact.runtime.hash;
 
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -168,6 +169,11 @@ public class CompactingHashTable<T> {
 	private MemorySegment[] buckets;
 	
 	/**
+	 * temporary storage for partition compaction
+	 */
+	private InMemoryPartition<T> compactionMemory;
+	
+	/**
 	 * The number of buckets in the current table. The bucket array is not necessarily fully
 	 * used, when not all buckets that would fit into the last segment are actually used.
 	 */
@@ -176,6 +182,8 @@ public class CompactingHashTable<T> {
 	private AtomicBoolean closed = new AtomicBoolean();
 	
 	private boolean running = true;
+		
+	private int pageSizeInBits;
 
 	// ------------------------------------------------------------------------
 	//                         Construction and Teardown
@@ -226,6 +234,7 @@ public class CompactingHashTable<T> {
 		
 		// because we allow to open and close multiple times, the state is initially closed
 		this.closed.set(true);
+		// so far no partition has any MemorySegments
 	}
 	
 	
@@ -315,7 +324,17 @@ public class CompactingHashTable<T> {
 		final InMemoryPartition<T> p = this.partitions.get(partitionNumber);
 		
 		
-		long pointer = p.appendRecord(record);
+		long pointer;
+		try {
+			pointer = p.appendRecord(record);
+			if((pointer >> this.pageSizeInBits) > this.compactionMemory.getBlockCount()) {
+				this.compactionMemory.allocateSegments((int)(pointer >> this.pageSizeInBits));
+			}
+		} catch (EOFException e) {
+			compactPartition(partitionNumber);
+			// retry append
+			pointer = this.partitions.get(partitionNumber).appendRecord(record);
+		}
 		insertBucketEntryFromStart(p, bucket, bucketInSegmentPos, hashCode, pointer);
 	}
 	
@@ -367,17 +386,21 @@ public class CompactingHashTable<T> {
 					// deserialize the key to check whether it is really equal, or whether we had only a hash collision
 					try {
 						partition.readRecordAt(pointer, tempHolder);
-						
 						if (this.comparator.equalToReference(tempHolder)) {
-							// found a match. replace it
 							long newPointer = partition.appendRecord(record);
 							bucket.putLong(pointerOffset, newPointer);
+							partition.setCompaction(false);
 							return;
 						}
-					}
-					catch (IOException e) {
+					} catch (EOFException e) {
+						compactPartition(partition.getPartitionNumber());
+						// retry append
+						long newPointer = this.partitions.get(partitionNumber).appendRecord(record);
+						bucket.putLong(pointerOffset, newPointer);
+						return;
+					} catch (IOException e) {
 						throw new RuntimeException("Error deserializing record from the hashtable: " + e.getMessage(), e);
-					}
+					} 
 				}
 				else {
 					numInSegment++;
@@ -561,11 +584,12 @@ public class CompactingHashTable<T> {
 		this.partitions.clear();
 		
 		ListMemorySegmentSource memSource = new ListMemorySegmentSource(this.availableMemory);
-		int pageSizeInBits = MathUtils.log2strict(this.segmentSize);
+		this.pageSizeInBits = MathUtils.log2strict(this.segmentSize);
 		
 		for (int i = 0; i < numPartitions; i++) {
 			this.partitions.add(new InMemoryPartition<T>(this.serializer, i, memSource, this.segmentSize, pageSizeInBits));
 		}
+		this.compactionMemory = new InMemoryPartition<T>(this.serializer, -1, memSource, this.segmentSize, pageSizeInBits);
 	}
 	
 	private void clearPartitions() {
@@ -574,6 +598,7 @@ public class CompactingHashTable<T> {
 			p.clearAllMemory(this.availableMemory);
 		}
 		this.partitions.clear();
+		this.compactionMemory.clearAllMemory(availableMemory);
 	}
 	
 	private void initTable(int numBuckets, byte numPartitions) {
@@ -679,6 +704,95 @@ public class CompactingHashTable<T> {
 	 */
 	private static final byte assignPartition(int bucket, byte numPartitions) {
 		return (byte) (bucket % numPartitions);
+	}
+	
+	/**
+	 * Compacts partition (to accommodate variable length fields)
+	 * 
+	 * @param partition partition number
+	 * @throws IOException 
+	 */
+	private void compactPartition(int partitionNumber) throws IOException {
+		this.compactionMemory.clearAllMemory(availableMemory);
+		this.compactionMemory.allocateSegments(1);
+		T tempHolder = this.serializer.createInstance();
+		InMemoryPartition<T> partition = this.partitions.remove(partitionNumber);
+		final int numPartitions = this.partitions.size() + 1; // dropped one earlier
+		long pointer = 0L;
+		int pointerOffset = 0;
+		int bucketOffset = 0;
+		final int bucketsPerSegment = this.bucketsPerSegmentMask + 1;
+		for (int i = 0, bucket = partitionNumber; i < this.buckets.length && bucket < this.numBuckets; i++) {
+			MemorySegment segment = this.buckets[i];
+			// go over all buckets in the segment
+			for (int k = bucket % bucketsPerSegment; k < bucketsPerSegment && bucket < this.numBuckets; k += numPartitions, bucket += numPartitions) {
+				bucketOffset = k * HASH_BUCKET_SIZE;
+				if((int)segment.get(bucketOffset + HEADER_PARTITION_OFFSET) != partitionNumber) {
+					throw new IOException("Accessed wrong bucket! ");
+				}
+				int count = segment.getInt(bucketOffset + HEADER_COUNT_OFFSET);
+				for (int j = 0; j < NUM_ENTRIES_PER_BUCKET && j < count; j++) {
+					pointerOffset = bucketOffset + BUCKET_POINTER_START_OFFSET + (j * POINTER_LEN);
+					pointer = segment.getLong(pointerOffset);
+					partition.readRecordAt(pointer, tempHolder);
+					pointer = this.compactionMemory.appendRecord(tempHolder);
+					segment.putLong(pointerOffset, pointer);
+				}
+				long overflowPointer = segment.getLong(bucketOffset + HEADER_FORWARD_OFFSET);
+				if(overflowPointer != BUCKET_FORWARD_POINTER_NOT_SET) {
+					// scan overflow buckets
+					int current = NUM_ENTRIES_PER_BUCKET;
+					pointerOffset = ((int) (overflowPointer & 0xffffffff)) + BUCKET_POINTER_START_OFFSET;
+					int overflowSegNum = (int) (overflowPointer >>> 32);
+					count += partition.overflowSegments[overflowSegNum].getInt(bucketOffset + HEADER_COUNT_OFFSET);
+					while(current < count) {
+						pointer = partition.overflowSegments[overflowSegNum].getLong(pointerOffset);
+						partition.readRecordAt(pointer, tempHolder);
+						pointer = this.compactionMemory.appendRecord(tempHolder);
+						partition.overflowSegments[overflowSegNum].putLong(pointerOffset, pointer);
+						current++;
+						if(current % NUM_ENTRIES_PER_BUCKET == 0) {
+							count += partition.overflowSegments[overflowSegNum].getInt(bucketOffset + HEADER_COUNT_OFFSET);
+							overflowPointer = partition.overflowSegments[overflowSegNum].getLong(bucketOffset + HEADER_FORWARD_OFFSET);
+							if(overflowPointer == BUCKET_FORWARD_POINTER_NOT_SET) {
+								break;
+							}
+							overflowSegNum = (int) (overflowPointer >>> 32);
+							pointerOffset = ((int) (overflowPointer & 0xffffffff)) + BUCKET_POINTER_START_OFFSET;
+						} else {
+							pointerOffset += POINTER_LEN;
+						}
+					}
+					//throw new IOException("Missed overflow bucket");
+				}
+			}
+		}
+		this.compactionMemory.setPartitionNumber(partitionNumber);
+		this.partitions.add(partitionNumber, compactionMemory);
+		this.compactionMemory = partition;
+		this.partitions.get(partitionNumber).overflowSegments = this.compactionMemory.overflowSegments;
+		this.partitions.get(partitionNumber).numOverflowSegments = this.compactionMemory.numOverflowSegments;
+		this.partitions.get(partitionNumber).nextOverflowBucket = this.compactionMemory.nextOverflowBucket;
+		this.partitions.get(partitionNumber).setCompaction(true);
+		this.compactionMemory.resetRecordCounter();
+		this.compactionMemory.setPartitionNumber(-1);
+		int maxSegmentNumber = 0;
+		for (InMemoryPartition<T> e : this.partitions) {
+			if(e.getBlockCount() > maxSegmentNumber) {
+				maxSegmentNumber = e.getBlockCount();
+			}
+		}
+		this.compactionMemory.allocateSegments(maxSegmentNumber);
+	}
+	
+	/**
+	 * Compacts partition but may not reclaim all garbage
+	 * 
+	 * @param partition partition number
+	 * @throws IOException 
+	 */
+	private void fastCompactPartition(int partitionNumber) throws IOException {
+		return;
 	}
 	
 	/**
