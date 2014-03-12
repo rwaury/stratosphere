@@ -32,6 +32,46 @@ import eu.stratosphere.pact.runtime.util.MathUtils;
 import eu.stratosphere.util.MutableObjectIterator;
 
 
+/**
+ * An implementation of an in-memory Hash Table for variable-length records. 
+ * <p>
+ * The design of this class follows on many parts the design presented in
+ * "Hash joins and hash teams in Microsoft SQL Server", by Goetz Graefe et al..
+ *<p>
+ *
+ *
+ * <hr>
+ * 
+ * The layout of the buckets inside a memory segment is as follows:
+ * 
+ * <pre>
+ * +----------------------------- Bucket x ----------------------------
+ * |Partition (1 byte) | Status (1 byte) | element count (2 bytes) |
+ * | next-bucket-in-chain-pointer (8 bytes) | reserved (4 bytes) |
+ * |
+ * |hashCode 1 (4 bytes) | hashCode 2 (4 bytes) | hashCode 3 (4 bytes) |
+ * | ... hashCode n-1 (4 bytes) | hashCode n (4 bytes)
+ * |
+ * |pointer 1 (8 bytes) | pointer 2 (8 bytes) | pointer 3 (8 bytes) |
+ * | ... pointer n-1 (8 bytes) | pointer n (8 bytes)
+ * |
+ * +---------------------------- Bucket x + 1--------------------------
+ * |Partition (1 byte) | Status (1 byte) | element count (2 bytes) |
+ * | next-bucket-in-chain-pointer (8 bytes) | reserved (4 bytes) |
+ * |
+ * |hashCode 1 (4 bytes) | hashCode 2 (4 bytes) | hashCode 3 (4 bytes) |
+ * | ... hashCode n-1 (4 bytes) | hashCode n (4 bytes)
+ * |
+ * |pointer 1 (8 bytes) | pointer 2 (8 bytes) | pointer 3 (8 bytes) |
+ * | ... pointer n-1 (8 bytes) | pointer n (8 bytes)
+ * +-------------------------------------------------------------------
+ * | ...
+ * |
+ * </pre>
+ * 
+ * @param T record type stored in hash table
+ * 
+ */
 public class CompactingHashTable<T> {
 	
 	private static final Log LOG = LogFactory.getLog(CompactingHashTable.class);
@@ -43,8 +83,7 @@ public class CompactingHashTable<T> {
 	private static final int MIN_NUM_MEMORY_SEGMENTS = 33;
 	
 	/**
-	 * The maximum number of partitions, which defines the spilling granularity. Each recursion, the
-	 * data is divided maximally into that many partitions, which are processed in one chuck.
+	 * The maximum number of partitions
 	 */
 	private static final int MAX_NUM_PARTITIONS = 32;
 	
@@ -53,7 +92,7 @@ public class CompactingHashTable<T> {
 	 * used to determine the ratio of the number of memory segments intended for partition
 	 * buffers and the number of memory segments in the hash-table structure. 
 	 */
-	private static final int DEFAULT_RECORD_LEN = 24;
+	private static final int DEFAULT_RECORD_LEN = 24; //FIXME maybe find a better default
 	
 	/**
 	 * The length of the hash code stored in the bucket.
@@ -169,7 +208,7 @@ public class CompactingHashTable<T> {
 	private MemorySegment[] buckets;
 	
 	/**
-	 * temporary storage for partition compaction
+	 * temporary storage for partition compaction (always attempts to allocate as many segments as the largest partition)
 	 */
 	private InMemoryPartition<T> compactionMemory;
 	
@@ -331,9 +370,13 @@ public class CompactingHashTable<T> {
 				this.compactionMemory.allocateSegments((int)(pointer >> this.pageSizeInBits));
 			}
 		} catch (EOFException e) {
-			compactPartition(partitionNumber);
-			// retry append
-			pointer = this.partitions.get(partitionNumber).appendRecord(record);
+			try {
+				compactPartition(partitionNumber);
+				// retry append
+				pointer = this.partitions.get(partitionNumber).appendRecord(record);
+			} catch (EOFException ex) {
+				throw new RuntimeException("Memory ran out. Compaction failed. Message: " + ex.getMessage());
+			}
 		}
 		insertBucketEntryFromStart(p, bucket, bucketInSegmentPos, hashCode, pointer);
 	}
@@ -344,7 +387,14 @@ public class CompactingHashTable<T> {
 	}
 	
 	
-	
+	/**
+	 * Replaces record in hash table if record already present or append record if not.
+	 * May trigger expensive compaction.
+	 * 
+	 * @param record record to insert or replace
+	 * @param tempHolder instance of T that will be overwritten
+	 * @throws IOException
+	 */
 	public void insertOrReplaceRecord(T record, T tempHolder) throws IOException {
 		final int searchHashCode = hash(this.comparator.hash(record));
 		final int posHashCode = searchHashCode % this.numBuckets;
@@ -393,9 +443,15 @@ public class CompactingHashTable<T> {
 							return;
 						}
 					} catch (EOFException e) {
-						compactPartition(partition.getPartitionNumber());
-						// retry append
-						long newPointer = this.partitions.get(partitionNumber).appendRecord(record);
+						// system is out of memory so we attempt to reclaim memory with a copy compact run
+						long newPointer;
+						try {
+							compactPartition(partition.getPartitionNumber());
+							// retry append
+							newPointer = this.partitions.get(partitionNumber).appendRecord(record);
+						} catch (EOFException ex) {
+							throw new RuntimeException("Memory ran out. Compaction failed. Message: " + ex.getMessage());
+						}
 						bucket.putLong(pointerOffset, newPointer);
 						return;
 					} catch (IOException e) {
@@ -408,7 +464,6 @@ public class CompactingHashTable<T> {
 			}
 			
 			// this segment is done. check if there is another chained bucket
-			
 			long newForwardPointer = bucket.getLong(bucketInSegmentOffset + HEADER_FORWARD_OFFSET);
 			if (newForwardPointer == BUCKET_FORWARD_POINTER_NOT_SET) {
 				// nothing found. append and insert
@@ -698,8 +753,8 @@ public class CompactingHashTable<T> {
 	/**
 	 * Assigns a partition to a bucket.
 	 * 
-	 * @param bucket
-	 * @param maxParts
+	 * @param bucket bucket index
+	 * @param numPartitions number of partitions
 	 * @return The hash code for the integer.
 	 */
 	private static final byte assignPartition(int bucket, byte numPartitions) {
@@ -707,12 +762,17 @@ public class CompactingHashTable<T> {
 	}
 	
 	/**
-	 * Compacts partition (to accommodate variable length fields)
+	 * Compacts (garbage collects) partition with copy-compact strategy using compaction partition
 	 * 
 	 * @param partition partition number
 	 * @throws IOException 
 	 */
 	private void compactPartition(int partitionNumber) throws IOException {
+		// stop if no garbage exists
+		if(this.partitions.get(partitionNumber).isCompacted()) {
+			return;
+		}
+		// release all segments owned by compaction partition
 		this.compactionMemory.clearAllMemory(availableMemory);
 		this.compactionMemory.allocateSegments(1);
 		T tempHolder = this.serializer.createInstance();
@@ -724,7 +784,7 @@ public class CompactingHashTable<T> {
 		final int bucketsPerSegment = this.bucketsPerSegmentMask + 1;
 		for (int i = 0, bucket = partitionNumber; i < this.buckets.length && bucket < this.numBuckets; i++) {
 			MemorySegment segment = this.buckets[i];
-			// go over all buckets in the segment
+			// go over all buckets in the segment belonging to the partition
 			for (int k = bucket % bucketsPerSegment; k < bucketsPerSegment && bucket < this.numBuckets; k += numPartitions, bucket += numPartitions) {
 				bucketOffset = k * HASH_BUCKET_SIZE;
 				if((int)segment.get(bucketOffset + HEADER_PARTITION_OFFSET) != partitionNumber) {
@@ -763,10 +823,10 @@ public class CompactingHashTable<T> {
 							pointerOffset += POINTER_LEN;
 						}
 					}
-					//throw new IOException("Missed overflow bucket");
 				}
 			}
 		}
+		// swap partition with compaction partition
 		this.compactionMemory.setPartitionNumber(partitionNumber);
 		this.partitions.add(partitionNumber, compactionMemory);
 		this.compactionMemory = partition;
@@ -776,6 +836,7 @@ public class CompactingHashTable<T> {
 		this.partitions.get(partitionNumber).setCompaction(true);
 		this.compactionMemory.resetRecordCounter();
 		this.compactionMemory.setPartitionNumber(-1);
+		// try to allocate maximum segment count
 		int maxSegmentNumber = 0;
 		for (InMemoryPartition<T> e : this.partitions) {
 			if(e.getBlockCount() > maxSegmentNumber) {
@@ -792,6 +853,7 @@ public class CompactingHashTable<T> {
 	 * @throws IOException 
 	 */
 	private void fastCompactPartition(int partitionNumber) throws IOException {
+		//TODO IMPLEMENT ME
 		return;
 	}
 	
@@ -815,7 +877,9 @@ public class CompactingHashTable<T> {
 	}
 	
 	
-	
+	/**
+	 * @param <P> Probe record type
+	 */
 	public final class HashTableProber<P> {
 		
 		private final TypeComparator<P> probeTypeComparator;
@@ -909,6 +973,7 @@ public class CompactingHashTable<T> {
 		public void updateMatch(T record) throws IOException {
 			long newPointer = this.partition.appendRecord(record);
 			this.bucket.putLong(this.pointerOffsetInBucket, newPointer);
+			this.partition.setCompaction(false); //FIXME Do we really create garbage here?
 		}
 	}
 }

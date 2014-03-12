@@ -27,7 +27,9 @@ import eu.stratosphere.nephele.services.memorymanager.AbstractPagedOutputView;
 import eu.stratosphere.nephele.services.memorymanager.ListMemorySegmentSource;
 
 /**
- * @param BT The type of the records.
+ * In-memory partition with overflow buckets for {@link CompactingHashTable}
+ * 
+ * @param T record type
  */
 public class InMemoryPartition<T> {
 	
@@ -53,27 +55,26 @@ public class InMemoryPartition<T> {
 	
 	private final ReadView readView;
 	
-	private long recordCounter;				// number of build-side records in this partition 
+	private long recordCounter;				// number of records in this partition including garbage
 	
 	// ----------------------------------------- General ------------------------------------------------
 	
 	private int partitionNumber;					// the number of the partition
 	
-	private boolean compacted;
+	private boolean compacted;						// overwritten records since allocation or last full compaction
 	
 	// --------------------------------------------------------------------------------------------------
 	
 	
 	
 	/**
-	 * Creates a new partition, initially in memory, with one buffer for the build side. The partition is
-	 * initialized to expect record insertions for the build side.
+	 * Creates a new partition, in memory, with one buffer. 
 	 * 
+	 * @param serializer Serializer for T.
 	 * @param partitionNumber The number of the partition.
-	 * @param recursionLevel The recursion level - zero for partitions from the initial build, <i>n + 1</i> for
-	 *                       partitions that are created from spilled partition with recursion level <i>n</i>. 
-	 * @param initialBuffer The initial buffer for this partition.
-	 * @param writeBehindBuffers The queue from which to pop buffers for writing, once the partition is spilled.
+	 * @param memSource memory pool
+	 * @param pageSize segment size in bytes
+	 * @param pageSizeInBits
 	 */
 	public InMemoryPartition(TypeSerializer<T> serializer, int partitionNumber,
 			ListMemorySegmentSource memSource, int pageSize, int pageSizeInBits)
@@ -90,6 +91,7 @@ public class InMemoryPartition<T> {
 		
 		// add the first segment
 		this.partitionPages.add(memSource.nextSegment());
+		// empty partitions have no garbage
 		this.compacted = true;
 		
 		this.writeView = new WriteView(this.partitionPages, memSource, pageSize, pageSizeInBits);
@@ -107,26 +109,50 @@ public class InMemoryPartition<T> {
 		return this.partitionNumber;
 	}
 	
+	/**
+	 * overwrites partition number and should only be used on compaction partition
+	 * @param number new partition
+	 */
 	public void setPartitionNumber(int number) {
 		this.partitionNumber = number;
 	}
 	
+	/**
+	 * 
+	 * @return number of segments owned by partition
+	 */
 	public int getBlockCount() {
 		return this.partitionPages.size();
 	}
 	
+	/**
+	 * number of recors in partition including garbage
+	 * 
+	 * @return number record count
+	 */
 	public long getRecordCount() {
 		return this.recordCounter;
 	}
 	
+	/**
+	 * sets record counter to zero and should only be used on compaction partition
+	 */
 	public void resetRecordCounter() {
 		this.recordCounter = 0L;
 	}
 	
+	/**
+	 * @return true if garbage exists in partition
+	 */
 	public boolean isCompacted() {
 		return this.compacted;
 	}
 	
+	/**
+	 * sets compaction status (should only be set <code>true</code> directly after compaction and <code>false</code> when garbage was created)
+	 * 
+	 * @param compacted compaction status
+	 */
 	public void setCompaction(boolean compacted) {
 		this.compacted = compacted;
 	}
@@ -135,12 +161,11 @@ public class InMemoryPartition<T> {
 	
 	/**
 	 * Inserts the given object into the current buffer. This method returns a pointer that
-	 * can be used to address the written record in this partition, if it is in-memory. The returned
-	 * pointers have no expressiveness in the case where the partition is spilled.
+	 * can be used to address the written record in this partition.
 	 * 
-	 * @param object The object to be written to the partition.
-	 * @return A pointer to the object in the partition, or <code>-1</code>, if the partition is spilled.
-	 * @throws IOException Thrown, when this is a spilled partition and the write failed.
+	 * @param record The object to be written to the partition.
+	 * @return A pointer to the object in the partition.
+	 * @throws IOException Thrown when the write failed.
 	 */
 	public final long appendRecord(T record) throws IOException {
 		long pointer = this.writeView.getCurrentPointer();
@@ -173,6 +198,7 @@ public class InMemoryPartition<T> {
 	 * @param record record to overwrite old one with
 	 * @throws IOException
 	 */
+	@Deprecated
 	public void overwriteRecordAt(long pointer, T record) throws IOException {
 		long tmpPointer = this.writeView.getCurrentPointer();
 		this.writeView.resetTo(pointer);
@@ -180,6 +206,10 @@ public class InMemoryPartition<T> {
 		this.writeView.resetTo(tmpPointer);
 	}
 	
+	/**
+	 * releases all of the partition's segments (pages and overflow buckets)
+	 * @param target memory pool to release segments to
+	 */
 	public void clearAllMemory(List<MemorySegment> target) {
 		// return the overflow segments
 		if (this.overflowSegments != null) {
@@ -193,6 +223,12 @@ public class InMemoryPartition<T> {
 		this.partitionPages.clear();
 	}
 	
+	/**
+	 * attempts to allocate specified number of segments and should only be used by compaction partition
+	 * fails silently if not enough segments are available since next compaction could still succeed
+	 * 
+	 * @param numberOfSegments allocation count
+	 */
 	public void allocateSegments(int numberOfSegments) {
 		while(getBlockCount() < numberOfSegments) {
 			MemorySegment next = this.availableMemory.nextSegment();
