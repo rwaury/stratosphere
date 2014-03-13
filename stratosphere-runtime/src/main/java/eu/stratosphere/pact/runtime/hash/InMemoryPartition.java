@@ -208,6 +208,7 @@ public class InMemoryPartition<T> {
 	
 	/**
 	 * releases all of the partition's segments (pages and overflow buckets)
+	 * 
 	 * @param target memory pool to release segments to
 	 */
 	public void clearAllMemory(List<MemorySegment> target) {
@@ -237,6 +238,12 @@ public class InMemoryPartition<T> {
 			} else {
 				return;
 			}
+		}
+	}
+	
+	public void releaseSegments(int maxSegmentNumber, ArrayList<MemorySegment> target) {
+		while(getBlockCount() > maxSegmentNumber) {
+			target.add(partitionPages.remove(partitionPages.size()-1));
 		}
 	}
 

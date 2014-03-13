@@ -844,6 +844,9 @@ public class CompactingHashTable<T> {
 			}
 		}
 		this.compactionMemory.allocateSegments(maxSegmentNumber);
+		if(this.compactionMemory.getBlockCount() > maxSegmentNumber) {
+			this.compactionMemory.releaseSegments(maxSegmentNumber, availableMemory);
+		}
 	}
 	
 	/**
@@ -853,6 +856,10 @@ public class CompactingHashTable<T> {
 	 * @throws IOException 
 	 */
 	private void fastCompactPartition(int partitionNumber) throws IOException {
+		// stop if no garbage exists
+		if(this.partitions.get(partitionNumber).isCompacted()) {
+			return;
+		}
 		//TODO IMPLEMENT ME
 		return;
 	}
