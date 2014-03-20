@@ -8,7 +8,7 @@ public class IntListPairComparator extends TypePairComparator<IntList, IntList> 
 
 	@Override
 	public void setReference(IntList reference) {
-		this.key = reference.getKey();		
+		this.key = reference.getKey();
 	}
 
 	@Override

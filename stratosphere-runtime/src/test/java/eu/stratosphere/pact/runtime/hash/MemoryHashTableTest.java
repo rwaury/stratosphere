@@ -25,6 +25,8 @@ import eu.stratosphere.api.common.typeutils.TypeComparator;
 import eu.stratosphere.api.common.typeutils.TypePairComparator;
 import eu.stratosphere.api.common.typeutils.TypeSerializer;
 import eu.stratosphere.core.memory.MemorySegment;
+import eu.stratosphere.pact.runtime.test.util.UniformIntPairGenerator;
+import eu.stratosphere.pact.runtime.test.util.UniformStringPairGenerator;
 import eu.stratosphere.pact.runtime.test.util.types.IntList;
 import eu.stratosphere.pact.runtime.test.util.types.IntListComparator;
 import eu.stratosphere.pact.runtime.test.util.types.IntListPairComparator;
@@ -33,6 +35,11 @@ import eu.stratosphere.pact.runtime.test.util.types.IntPair;
 import eu.stratosphere.pact.runtime.test.util.types.IntPairComparator;
 import eu.stratosphere.pact.runtime.test.util.types.IntPairPairComparator;
 import eu.stratosphere.pact.runtime.test.util.types.IntPairSerializer;
+import eu.stratosphere.pact.runtime.test.util.types.StringPair;
+import eu.stratosphere.pact.runtime.test.util.types.StringPairComparator;
+import eu.stratosphere.pact.runtime.test.util.types.StringPairPairComparator;
+import eu.stratosphere.pact.runtime.test.util.types.StringPairSerializer;
+import eu.stratosphere.util.MutableObjectIterator;
 import static org.junit.Assert.*;
 
 
@@ -61,14 +68,25 @@ public class MemoryHashTableTest {
 	private final TypeComparator<IntList> comparatorV = new IntListComparator();
 	
 	private final TypePairComparator<IntList, IntList> pairComparatorV = new IntListPairComparator();
+	
+	private final int SIZE = 80; //FIXME 75 triggers serialization bug in testVariableLengthBuildAndRetrieve
+	
+	private final int NUM_PAIRS = 100000;
 
+	private final int NUM_LISTS = 100000;
+	
+
+	private final TypeSerializer<StringPair> serializerS = new StringPairSerializer();
+	
+	private final TypeComparator<StringPair> comparatorS = new StringPairComparator();
+	
+	private final TypePairComparator<StringPair, StringPair> pairComparatorS = new StringPairPairComparator();
 	
 	
 	@Test
 	public void testBuildAndRetrieve() {
 		
 		try {
-			final int NUM_PAIRS = 100000;
 			final int NUM_MEM_PAGES = 32 * NUM_PAIRS / PAGE_SIZE;
 			
 			final IntPair[] pairs = getRandomizedIntPairs(NUM_PAIRS, rnd);
@@ -101,8 +119,7 @@ public class MemoryHashTableTest {
 	@Test
 	public void testVariableLengthBuildAndRetrieve() {
 		try {
-			final int NUM_LISTS = 20000;
-			final int NUM_MEM_PAGES = 100 * NUM_LISTS / PAGE_SIZE;
+			final int NUM_MEM_PAGES = SIZE * NUM_LISTS / PAGE_SIZE;
 			
 			final IntList[] lists = getRandomizedIntLists(NUM_LISTS, rnd);
 			
@@ -151,8 +168,7 @@ public class MemoryHashTableTest {
 	@Test
 	public void testVariableLengthBuildAndRetrieveMajorityUpdated() {
 		try {
-			final int NUM_LISTS = 20000;
-			final int NUM_MEM_PAGES = 100 * NUM_LISTS / PAGE_SIZE;
+			final int NUM_MEM_PAGES = SIZE * NUM_LISTS / PAGE_SIZE;
 						
 			final IntList[] lists = getRandomizedIntLists(NUM_LISTS, rnd);
 			
@@ -237,6 +253,79 @@ public class MemoryHashTableTest {
 			}
 			
 			table.close();
+			assertEquals("Memory lost", NUM_MEM_PAGES, table.getFreeMemory().size());
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			fail("Error: " + e.getMessage());
+		}
+	}
+	
+	@Test
+	public void testVariableLengthStringBuildAndRetrieve() {
+		
+		try {
+			final int NUM_MEM_PAGES = 40 * NUM_PAIRS / PAGE_SIZE;
+			
+			MutableObjectIterator<StringPair> buildInput = new UniformStringPairGenerator(NUM_PAIRS, 1, false);
+			
+			MutableObjectIterator<StringPair> probeTester = new UniformStringPairGenerator(NUM_PAIRS, 1, false);
+			
+			MutableObjectIterator<StringPair> updater = new UniformStringPairGenerator(NUM_PAIRS, 1, false);
+
+			MutableObjectIterator<StringPair> updateTester = new UniformStringPairGenerator(NUM_PAIRS, 1, false);
+			
+			long start = 0L;
+			long end = 0L;
+			
+			long first = System.currentTimeMillis();
+			
+			System.out.println("Creating and filling CompactingHashMap...");
+			start = System.currentTimeMillis();
+			CompactingHashTable<StringPair> table = new CompactingHashTable<StringPair>(serializerS, comparatorS, getMemory(NUM_MEM_PAGES, PAGE_SIZE));
+			table.open();
+			
+			StringPair target = new StringPair();
+			while(buildInput.next(target)) {
+				table.insert(target);
+			}
+			end = System.currentTimeMillis();
+			System.out.println("HashMap ready. Time: " + (end-start) + " ms");
+			
+			System.out.println("Starting first probing run...");
+			start = System.currentTimeMillis();
+			CompactingHashTable<StringPair>.HashTableProber<StringPair> prober = table.createProber(comparatorS.duplicate(), pairComparatorS);
+			StringPair temp = new StringPair();
+			while(probeTester.next(target)) {
+				assertTrue(prober.getMatchFor(target, temp));
+				assertEquals(temp.getValue(), target.getValue());
+			}
+			end = System.currentTimeMillis();
+			System.out.println("Probing done. Time: " + (end-start) + " ms");
+			
+			System.out.println("Starting update...");
+			start = System.currentTimeMillis();
+			while(updater.next(target)) {
+				target.setValue(target.getValue());
+				table.insertOrReplaceRecord(target, temp);
+			}
+			end = System.currentTimeMillis();
+			System.out.println("Update done. Time: " + (end-start) + " ms");
+			
+			System.out.println("Starting second probing run...");
+			start = System.currentTimeMillis();
+			while (updateTester.next(target)) {
+				assertTrue(prober.getMatchFor(target, temp));
+				assertEquals(target.getValue(), temp.getValue());
+			}
+			end = System.currentTimeMillis();
+			System.out.println("Probing done. Time: " + (end-start) + " ms");
+			
+			table.close();
+			
+			end = System.currentTimeMillis();
+			System.out.println("Overall time: " + (end-first) + " ms");
+			
 			assertEquals("Memory lost", NUM_MEM_PAGES, table.getFreeMemory().size());
 		}
 		catch (Exception e) {

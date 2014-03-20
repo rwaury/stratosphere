@@ -23,7 +23,9 @@ public class HashTablePerformanceComparisonTest {
 		
 	private static final int PAGE_SIZE = 16 * 1024;
 	
-	private final int NUM_PAIRS = 200000;
+	private final int NUM_PAIRS = 2000000;
+	
+	private final int SIZE = 36;
 		
 	private final TypeSerializer<IntPair> serializer = new IntPairSerializer();
 	
@@ -37,7 +39,7 @@ public class HashTablePerformanceComparisonTest {
 	public void testCompactingHashMapPerformance() {
 		
 		try {
-			final int NUM_MEM_PAGES = 45 * NUM_PAIRS / PAGE_SIZE;
+			final int NUM_MEM_PAGES = SIZE * NUM_PAIRS / PAGE_SIZE;
 			
 			MutableObjectIterator<IntPair> buildInput = new UniformIntPairGenerator(NUM_PAIRS, 1, false);
 			
@@ -109,7 +111,7 @@ public class HashTablePerformanceComparisonTest {
 	@Test
 	public void testMutableHashMapPerformance() {
 		try {
-			final int NUM_MEM_PAGES = 45 * NUM_PAIRS / PAGE_SIZE;
+			final int NUM_MEM_PAGES = SIZE * NUM_PAIRS / PAGE_SIZE;
 			
 			MutableObjectIterator<IntPair> buildInput = new UniformIntPairGenerator(NUM_PAIRS, 1, false);
 

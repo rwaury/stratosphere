@@ -442,14 +442,14 @@ public class CompactingHashTable<T> {
 							partition.setCompaction(false);
 							return;
 						}
-					} catch (EOFException e) {
+					} catch (EOFException | IndexOutOfBoundsException e) {
 						// system is out of memory so we attempt to reclaim memory with a copy compact run
 						long newPointer;
 						try {
 							compactPartition(partition.getPartitionNumber());
 							// retry append
 							newPointer = this.partitions.get(partitionNumber).appendRecord(record);
-						} catch (EOFException ex) {
+						} catch (IndexOutOfBoundsException | EOFException ex) {
 							throw new RuntimeException("Memory ran out. Compaction failed. Message: " + ex.getMessage());
 						}
 						bucket.putLong(pointerOffset, newPointer);
