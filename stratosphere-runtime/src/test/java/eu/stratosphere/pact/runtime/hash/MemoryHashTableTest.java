@@ -25,7 +25,6 @@ import eu.stratosphere.api.common.typeutils.TypeComparator;
 import eu.stratosphere.api.common.typeutils.TypePairComparator;
 import eu.stratosphere.api.common.typeutils.TypeSerializer;
 import eu.stratosphere.core.memory.MemorySegment;
-import eu.stratosphere.pact.runtime.test.util.UniformIntPairGenerator;
 import eu.stratosphere.pact.runtime.test.util.UniformStringPairGenerator;
 import eu.stratosphere.pact.runtime.test.util.types.IntList;
 import eu.stratosphere.pact.runtime.test.util.types.IntListComparator;
@@ -69,7 +68,7 @@ public class MemoryHashTableTest {
 	
 	private final TypePairComparator<IntList, IntList> pairComparatorV = new IntListPairComparator();
 	
-	private final int SIZE = 80; //FIXME 75 triggers serialization bug in testVariableLengthBuildAndRetrieve
+	private final int SIZE = 79; //FIXME 75 triggers serialization bug in testVariableLengthBuildAndRetrieve
 	
 	private final int NUM_PAIRS = 100000;
 
@@ -216,7 +215,7 @@ public class MemoryHashTableTest {
 	public void testVariableLengthBuildAndRetrieveMinorityUpdated() {
 		try {
 			final int NUM_LISTS = 20000;
-			final int NUM_MEM_PAGES = 100 * NUM_LISTS / PAGE_SIZE;
+			final int NUM_MEM_PAGES = SIZE * NUM_LISTS / PAGE_SIZE;
 			
 			final int STEP_SIZE = 100;
 			

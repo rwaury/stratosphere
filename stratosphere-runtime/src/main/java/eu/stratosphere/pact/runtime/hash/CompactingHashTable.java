@@ -440,6 +440,9 @@ public class CompactingHashTable<T> {
 							long newPointer = partition.appendRecord(record);
 							bucket.putLong(pointerOffset, newPointer);
 							partition.setCompaction(false);
+							if((newPointer >> this.pageSizeInBits) > this.compactionMemory.getBlockCount()) {
+								this.compactionMemory.allocateSegments((int)(newPointer >> this.pageSizeInBits));
+							}
 							return;
 						}
 					} catch (EOFException | IndexOutOfBoundsException e) {
@@ -469,6 +472,9 @@ public class CompactingHashTable<T> {
 				// nothing found. append and insert
 				long pointer = partition.appendRecord(record);
 				insertBucketEntryFromSearch(partition, originalBucket, bucket, originalBucketOffset, bucketInSegmentOffset, countInSegment, currentForwardPointer, searchHashCode, pointer);
+				if((pointer >> this.pageSizeInBits) > this.compactionMemory.getBlockCount()) {
+					this.compactionMemory.allocateSegments((int)(pointer >> this.pageSizeInBits));
+				}
 				return;
 			}
 			
